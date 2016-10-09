@@ -1,0 +1,663 @@
+
+@@ -0,0 +1,11 @@
+ +.settings
+ +target
+ +.project
+ +.iso
+ +.classpath
+ +bin
+ +build.xml
+ +.DS_Store
+ +m2e-wtp
+ +*.box
+ +elasticsearch-data 
+View
+41  doc.txt
+@@ -0,0 +1,41 @@
+ +==========
+ +curl -XPUT 'http://localhost:9200/logentries/' -d '
+ +{
+ +  "mappings":{
+ +    "logentry" : {
+ +        "properties" : {
+ +            "path" : {"type" : "string", "store" : true },
+ +            "method" : {"type" : "string", "store" : true },
+ +            "response time" : {"type" : "string", "store" : true },
+ +            "device" : {"type" : "string", "store" : true },
+ +            "user agent" : {"type" : "string", "store" : true },
+ +            "timestamp" : {"type" : "string", "store" : true },
+ +            "status" : {"type" : "string", "store" : true }
+ +        }
+ +    }
+ +  }
+ +}
+ +'
+ +
+ +============
+ +curl -XPUT 'localhost:9200/logentries/.percolator/078b0d84-1111-4250-9d4c-31bd9d5a83cb' -d '{
+ +    "query" : {
+ +        "query_string" : {
+ +            "query" : "201"
+ +        }
+ +    }
+ +}'
+ +
+ +===========
+ +curl -XGET 'localhost:9200/logentries/logentry/_percolate' -d '{
+ +"doc" : {
+ +	"path":"/d",
+ +	"method":"GET",
+ +	"response time":"383",
+ +	"device":"Phone",
+ +	"user agent":"Safari",
+ +	"timestamp":"2014-12-14 21:49:53.724",
+ +	"status":"201"
+ +        }
+ +}'
+ +============
+View
+49  pom.xml
+@@ -0,0 +1,49 @@
+ +<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+ +  <modelVersion>4.0.0</modelVersion>
+ +  <groupId>com.rokhmanov.test</groupId>
+ +  <artifactId>strum</artifactId>
+ +  <version>0.0.1-SNAPSHOT</version>  
+ +  
+ +  <dependencies>
+ +    <dependency>
+ +      <groupId>com.typesafe.akka</groupId>
+ +      <artifactId>akka-actor_2.11</artifactId>
+ +      <version>2.3.7</version>
+ +    </dependency>
+ +    <dependency>
+ +      <groupId>com.typesafe.akka</groupId>
+ +      <artifactId>akka-stream-experimental_2.11</artifactId>
+ +      <version>0.11</version>
+ +    </dependency>
+ +	<dependency>
+ +	    	<groupId>org.glassfish.jersey.core</groupId>
+ +    		<artifactId>jersey-client</artifactId>
+ +	    	<version>2.14</version>
+ +	</dependency>
+ +	<dependency>
+ +    		<groupId>org.glassfish.jersey.media</groupId>
+ +	    	<artifactId>jersey-media-json-processing</artifactId>
+ +	    	<version>2.14</version>
+ +	</dependency>	
+ +	<dependency>
+ +		<groupId>org.elasticsearch</groupId>
+ +		<artifactId>elasticsearch</artifactId>
+ +		<version>1.4.0</version>
+ +	</dependency>
+ +	
+ +  </dependencies>
+ +  
+ +  	<build>
+ +		<plugins>
+ +			<plugin>
+ +				<groupId>org.apache.maven.plugins</groupId>
+ +				<artifactId>maven-compiler-plugin</artifactId>
+ +				<version>3.2</version>
+ +				<configuration>
+ +					<source>1.8</source>
+ +					<target>1.8</target>
+ +				</configuration>
+ +			</plugin>
+ +	      </plugins>
+ +	</build>
+ +</project> 
+View
+102  src/main/java/com/rokhmanov/strum/ElasticSearchActor.java
+@@ -0,0 +1,102 @@
+ +package com.rokhmanov.strum;
+ +
+ +import java.util.List;
+ +import java.util.UUID;
+ +import java.util.stream.Collectors;
+ +
+ +import javax.json.Json;
+ +import javax.json.JsonArray;
+ +import javax.json.JsonObject;
+ +import javax.json.JsonValue;
+ +import javax.ws.rs.client.Client;
+ +import javax.ws.rs.client.ClientBuilder;
+ +import javax.ws.rs.client.Entity;
+ +import javax.ws.rs.client.WebTarget;
+ +import javax.ws.rs.core.MediaType;
+ +import javax.ws.rs.core.Response;
+ +
+ +import akka.actor.UntypedActor;
+ +
+ +import com.rokhmanov.strum.SearchProtocol.LogEntry;
+ +import com.rokhmanov.strum.SearchProtocol.StartSearch;
+ +import com.rokhmanov.strum.SearchProtocol.StopSearch;
+ +
+ +public class ElasticSearchActor extends UntypedActor {
+ +
+ +	private Client client = ClientBuilder.newClient();
+ +				
+ +	@Override
+ +	public void onReceive(Object message) throws Exception {
+ +		if(message instanceof SearchProtocol.LogEntry){
+ +			percolate((SearchProtocol.LogEntry)message);
+ +		} else if (message instanceof SearchProtocol.StartSearch){
+ +			registerQuery((SearchProtocol.StartSearch)message);
+ +		} else if (message instanceof SearchProtocol.StopSearch){
+ +			unregisterQuery((SearchProtocol.StopSearch)message);
+ +		} else if(message == SearchProtocol.Init){
+ +			createMapping();					
+ +		}
+ +	}
+ +
+ +	private void createMapping(){		
+ +		JsonObject stringStoreType = Json.createObjectBuilder().add("type", "string").add("store", true).build();
+ +		JsonObject properties = Json.createObjectBuilder().add("properties", Json.createObjectBuilder()
+ +				.add("path", stringStoreType)
+ +				.add("method", stringStoreType)
+ +				.add("response time", stringStoreType)
+ +				.add("device", stringStoreType)
+ +				.add("user agent", stringStoreType)
+ +				.add("timestamp", stringStoreType)
+ +				.add("status", stringStoreType))
+ +				.build();		
+ +		JsonObject mappings	= Json.createObjectBuilder().add("mappings", 
+ +				Json.createObjectBuilder().add("logentry", properties))
+ +				.build();	
+ +		WebTarget webTarget = client.target("http://localhost:9200/logentries/");
+ +		Response response = webTarget.request(MediaType.APPLICATION_JSON).put(Entity.json(mappings));
+ +		if (response.getStatusInfo().getStatusCode() != Response.Status.OK.getStatusCode()) {
+ +			   throw new RuntimeException("Register Query failed. HTTP error code : " + response.getStatus());
+ +		}		
+ +	}
+ +	
+ +	private void registerQuery(StartSearch message) {
+ +		JsonObject query = Json.createObjectBuilder().add("query",
+ +				Json.createObjectBuilder().add("query_string",
+ +						Json.createObjectBuilder().add("query", message.getSearchString()))).build();
+ +		Response response = client.target("http://localhost:9200/logentries/.percolator/" + message.getId())
+ +				.request(MediaType.APPLICATION_JSON).put(Entity.json(query));
+ +		if (response.getStatusInfo().getStatusCode() != Response.Status.CREATED.getStatusCode()) {
+ +			   throw new RuntimeException("Register Query failed. HTTP error code : " + response.getStatus());
+ +		}		
+ +	}
+ +
+ +
+ +	private void unregisterQuery(StopSearch message) {
+ +		Response response = client.target("http://localhost:9200/logentries/.percolator/" + message.getId())
+ +				.request(MediaType.APPLICATION_JSON).delete();
+ +		if (response.getStatusInfo().getStatusCode() != Response.Status.GONE.getStatusCode()) {
+ +			   throw new RuntimeException("Unregister Query failed. HTTP error code : " + response.getStatus());
+ +		}		
+ +	}
+ +	
+ +	private void percolate(LogEntry message) {		
+ +		JsonObject doc = Json.createObjectBuilder().add("doc", message.getData()).build();
+ +		Response response = client.target("http://localhost:9200/logentries/logentry/_percolate/")
+ +				.request(MediaType.APPLICATION_JSON).post(Entity.json(doc));
+ +		if (response.getStatusInfo().getStatusCode() != Response.Status.OK.getStatusCode()) {
+ +			   throw new RuntimeException("Percolate Query failed. HTTP error code : " + response.getStatus());
+ +		}
+ +		JsonObject reply = response.readEntity(JsonObject.class);
+ +		JsonArray matches = reply.getJsonArray("matches");
+ +		if(matches.size() > 0){
+ +			List<UUID> uids = matches.stream().parallel().map(ElasticSearchActor::getMatchId).collect(Collectors.toList());
+ +			getSender().tell(new SearchProtocol().new SearchMatch(message, uids), getSelf());
+ +		}
+ +	}
+ +	
+ +	private static UUID getMatchId(JsonValue match){
+ +		return UUID.fromString(((JsonObject)match).getString("_id"));
+ +	}
+ +}
+ +
+ +
+View
+33  src/main/java/com/rokhmanov/strum/EmbeddedESServer.java
+@@ -0,0 +1,33 @@
+ +package com.rokhmanov.strum;
+ +
+ +import java.io.File;
+ +
+ +import org.elasticsearch.client.Client;
+ +import org.elasticsearch.common.settings.ImmutableSettings;
+ +import org.elasticsearch.node.Node;
+ +
+ +import static org.elasticsearch.node.NodeBuilder.*;
+ +
+ +public class EmbeddedESServer {
+ +	
+ +	private Client client;
+ +	private Node node;
+ +	
+ +	public Client getClient(){
+ +		return this.client;
+ +	}
+ +	
+ +	public EmbeddedESServer(File dataDirectory){
+ +		ImmutableSettings.Builder settings = ImmutableSettings.settingsBuilder();
+ +		settings.put("node.name", "test-node-1");
+ +		settings.put("path.data", dataDirectory.getAbsolutePath());
+ +		this.node = nodeBuilder().local(true).settings(settings).node();
+ +		this.client = node.client();
+ +	}
+ +	
+ +	public void shutdown(){
+ +		this.client.close();
+ +		this.node.close();
+ +	}
+ +	
+ +}
+View
+51  src/main/java/com/rokhmanov/strum/LogEntryProducerActor.java
+@@ -0,0 +1,51 @@
+ +package com.rokhmanov.strum;
+ +
+ +import java.sql.Timestamp;
+ +import java.util.Date;
+ +import java.util.Random;
+ +
+ +import javax.json.Json;
+ +import javax.json.JsonObject;
+ +import javax.json.JsonValue;
+ +
+ +import akka.actor.UntypedActor;
+ +
+ +public class LogEntryProducerActor extends UntypedActor {
+ +
+ +	private String[] devices = {"Desktop", "Tablet", "Phone", "TV"};
+ +	private String[] useragents = {"Chrome", "Firefox", "Internet Explorer", "Safari", "HttpClient"};
+ +	private String[] paths = {"/a", "/b", "/c", "/d", "/e"};
+ +	private String[] methods = {"GET", "POST", "PUT", "DELETE"};
+ +	private String[] statuses = {"200", "404", "201", "500"};
+ +	
+ +	@Override
+ +	public void onReceive(Object message) throws Exception {
+ +		if (message == SearchProtocol.Tick){
+ +			getSender().tell(new SearchProtocol().new LogEntry(generateLogEntry()), getSelf());
+ +		}
+ +	}
+ +
+ +	private JsonValue generateLogEntry() {
+ +		JsonObject logEntry = Json.createObjectBuilder()
+ +				.add("timestamp", new Timestamp(new Date().getTime()).toString())
+ +				.add("response time", getRandomResponseTime() + "")
+ +				.add("method", randomElement(methods))
+ +				.add("path", randomElement(paths))
+ +				.add("status", randomElement(statuses))
+ +				.add("device", randomElement(devices))
+ +				.add("user agent", randomElement(useragents))
+ +				.build();		
+ +		return logEntry;
+ +	}
+ +
+ +	private String randomElement(String[] elements) {
+ +		Random rand = new Random(System.currentTimeMillis());
+ +		int randIdx = rand.nextInt(elements.length);
+ +		return elements[randIdx];
+ +	}
+ +
+ +	private int getRandomResponseTime() {		
+ +		return new Random(System.currentTimeMillis()).nextInt(1000);
+ +	}
+ +
+ +}
+View
+81  src/main/java/com/rokhmanov/strum/Main.java
+@@ -0,0 +1,81 @@
+ +package com.rokhmanov.strum;
+ +
+ +import java.io.File;
+ +import java.util.concurrent.ExecutionException;
+ +import java.util.function.Supplier;
+ +import java.util.stream.Stream;
+ +
+ +import javax.json.JsonValue;
+ +
+ +import org.iq80.leveldb.util.FileUtils;
+ +
+ +import scala.concurrent.duration.Duration;
+ +import akka.actor.ActorRef;
+ +import akka.actor.ActorSystem;
+ +import akka.actor.Props;
+ +import akka.dispatch.OnSuccess;
+ +import akka.pattern.Patterns;
+ +import akka.util.Timeout;
+ +
+ +public class Main {
+ +
+ +	private static EmbeddedESServer esServer;
+ +	private static File esDataDirectory;
+ +	private static String SEARCH_STRING = "20";
+ +	
+ +	public static void main(String[] args) {
+ +		try {
+ +			startup();
+ +		} catch (Exception e) {
+ +			e.printStackTrace();
+ +			shutdown();
+ +			System.exit(1);
+ +		}
+ +		Timeout timeout = new Timeout(Duration.create(30, "seconds"));
+ +		ActorSystem system = ActorSystem.create("strum");
+ +		ActorRef worker = system.actorOf(Props.create(MainSearchActor.class), "worker");
+ +		worker.tell(SearchProtocol.Init, null);
+ +		
+ +		for (int i = 0; i < 20; i++) {
+ +			Patterns.ask(worker, new SearchProtocol().new StartSearch(SEARCH_STRING + i), timeout)
+ +				.onSuccess(new OnSuccessSearch<Object>(SEARCH_STRING + i) , system.dispatcher());					
+ +		}
+ +		
+ +		//shutdown();
+ +	}
+ +	
+ +	private static void startup() throws InterruptedException, ExecutionException {
+ +		esDataDirectory = new File(System.getProperty("user.dir"), "elasticsearch-data");
+ +		// TODO: remove folder deletion 
+ +		FileUtils.deleteRecursively(esDataDirectory);
+ +		esServer = new EmbeddedESServer(esDataDirectory);
+ +	}
+ +	
+ +	private static void shutdown() {
+ +		if(null != esServer)esServer.shutdown();
+ +		FileUtils.deleteRecursively(esDataDirectory);
+ +	}
+ +
+ +}
+ +
+ +class OnSuccessSearch<T> extends OnSuccess<T> {
+ +	String searchCriteria;
+ +	public OnSuccessSearch(String searchCriteria){
+ +		this.searchCriteria = searchCriteria;
+ +	}
+ +	@Override
+ +	public void onSuccess(Object obj) {
+ +		SearchProtocol.SearchFeed feed = (SearchProtocol.SearchFeed)obj;
+ +		Stream.generate(new Supplier<JsonValue>(){
+ +			@Override
+ +			public JsonValue get() {
+ +				try {
+ +					return feed.getElements().take();
+ +				} catch (InterruptedException e) {
+ +					e.printStackTrace();
+ +				}
+ +				return JsonValue.NULL;
+ +			}
+ +		}).forEach(s -> System.out.println(searchCriteria + "===>" + s));
+ +	}
+ +} 
+View
+78  src/main/java/com/rokhmanov/strum/MainSearchActor.java
+@@ -0,0 +1,78 @@
+ +package com.rokhmanov.strum;
+ +
+ +import java.util.HashMap;
+ +import java.util.Map;
+ +import java.util.Queue;
+ +import java.util.UUID;
+ +import java.util.concurrent.BlockingQueue;
+ +import java.util.concurrent.LinkedBlockingQueue;
+ +
+ +import javax.json.JsonValue;
+ +
+ +import scala.concurrent.ExecutionContext;
+ +import scala.concurrent.duration.Duration;
+ +import akka.actor.ActorRef;
+ +import akka.actor.Props;
+ +import akka.actor.Scheduler;
+ +import akka.actor.UntypedActor;
+ +
+ +import com.rokhmanov.strum.SearchProtocol.SearchMatch;
+ +import com.rokhmanov.strum.SearchProtocol.StopSearch;
+ +
+ +public class MainSearchActor extends UntypedActor {
+ +
+ +	private Scheduler scheduler = getContext().system().scheduler();
+ +	private ExecutionContext ec = getContext().system().dispatcher();
+ +	ActorRef elasticSearchActor = getContext().actorOf(Props.create(ElasticSearchActor.class), "elasticSearchActor");
+ +	ActorRef logEntryProducerActor = getContext().actorOf(Props.create(LogEntryProducerActor.class), "logEntryProducer");
+ +	Map<UUID, Queue<JsonValue>> channels = new HashMap<>();
+ +	
+ +	public void preStart(){
+ +		scheduler.schedule(Duration.create(3, "seconds"), Duration.create(10, "milliseconds"), getSelf(), SearchProtocol.Tick, ec, getSelf());
+ +	}
+ +	
+ +	@Override
+ +	public void onReceive(Object message) throws Exception {
+ +		if(message == SearchProtocol.Tick){
+ +			logEntryProducerActor.tell(SearchProtocol.Tick, getSelf());
+ +		}
+ +		else if(message == SearchProtocol.Init){
+ +			elasticSearchActor.tell(SearchProtocol.Init, getSelf());
+ +		}
+ +		else if(message instanceof SearchProtocol.LogEntry){
+ +			elasticSearchActor.tell(message, getSelf());
+ +		}
+ +		else if(message instanceof SearchProtocol.StartSearch){
+ +			getSender().tell(new SearchProtocol().new SearchFeed(startSearching((SearchProtocol.StartSearch)message)), getSelf());
+ +		}
+ +		else if(message instanceof SearchProtocol.StopSearch){
+ +			stopSearching((SearchProtocol.StopSearch) message);
+ +		}
+ +		else if(message instanceof SearchProtocol.SearchMatch){
+ +			broadcastMatch((SearchProtocol.SearchMatch)message);
+ +		}		
+ +	}
+ +
+ +	private BlockingQueue<JsonValue> startSearching(SearchProtocol.StartSearch searchMessage) {
+ +		BlockingQueue<JsonValue> queue = new LinkedBlockingQueue<>();
+ +		channels.put(searchMessage.getId(), queue);
+ +		elasticSearchActor.tell(searchMessage, getSelf());
+ +		return queue;
+ +	}
+ +
+ +	private void stopSearching(StopSearch stopMessage) {
+ +		channels.remove(stopMessage.getId());
+ +		elasticSearchActor.tell(stopMessage, getSelf());
+ +	}
+ +
+ +	private void broadcastMatch(SearchMatch match) {
+ +		match.getMatchingChannelIds().forEach(
+ +				channelId -> {
+ +					if (channels.containsKey(channelId)){
+ +						channels.get(channelId).offer(match.getLogEntry().getData());
+ +					} 
+ +				}
+ +		);		
+ +	}
+ +
+ +}
+View
+100  src/main/java/com/rokhmanov/strum/SearchProtocol.java
+@@ -0,0 +1,100 @@
+ +package com.rokhmanov.strum;
+ +
+ +import java.util.List;
+ +import java.util.UUID;
+ +import java.util.concurrent.BlockingQueue;
+ +
+ +import javax.json.JsonValue;
+ +
+ +public class SearchProtocol {
+ +
+ +	class LogEntry {
+ +		private JsonValue data;
+ +		public LogEntry (JsonValue jsElement){
+ +			this.data = jsElement;
+ +		}		
+ +		public JsonValue getData(){
+ +			return this.data;
+ +		}
+ +		public String toString(){
+ +			return this.data.toString();
+ +		}
+ +	}
+ +	
+ +	
+ +	class StartSearch {
+ +		private String searchString;
+ +		private UUID id;
+ +		public StartSearch(String searchString){
+ +			this.id = UUID.randomUUID();
+ +			this.searchString = searchString;
+ +		}
+ +		public UUID getId(){
+ +			return this.id;
+ +		}
+ +		public String getSearchString(){
+ +			return this.searchString;
+ +		}
+ +		public String toString(){
+ +			return "UUID:" + id + ", searchString:" + searchString;
+ +		}
+ +	}
+ +	
+ +	
+ +	class StopSearch {
+ +		private UUID id;
+ +		public StopSearch(UUID id){
+ +			this.id = id;
+ +		}
+ +		public UUID getId(){
+ +			return id;
+ +		}
+ +		public String toString(){
+ +			return id.toString();
+ +		}
+ +	}
+ +	
+ +	
+ +	class SearchFeed {
+ +		private BlockingQueue<JsonValue> out; 
+ +		public SearchFeed(BlockingQueue<JsonValue> startSearching) {
+ +			this.out = startSearching;
+ +		}
+ +		public BlockingQueue<JsonValue> getElements(){
+ +			return out;
+ +		}
+ +	}
+ +	
+ +	
+ +	class SearchMatch {
+ +		private LogEntry logEntry;
+ +		private List<UUID> matchingChannelIds;
+ +		public SearchMatch(LogEntry logEntry, List<UUID> channelIds){
+ +			this.logEntry = logEntry;
+ +			this.matchingChannelIds = channelIds;
+ +		}
+ +		public LogEntry getLogEntry() {
+ +			return logEntry;
+ +		}
+ +		public List<UUID> getMatchingChannelIds() {
+ +			return matchingChannelIds;
+ +		}
+ +		public String toString(){
+ +			return "LogEntry:" + logEntry + ", matchingChannelIDs:" + matchingChannelIds.toArray();
+ +		}
+ +	}
+ +	
+ +	final static Object Tick = new Object() {
+ +		@Override
+ +		public String toString() {
+ +			return "Tick";
+ +		}
+ +	};
+ +	
+ +	final static Object Init = new Object() {
+ +		@Override
+ +		public String toString() {
+ +			return "Init";
+ +		}
+ +	};
+ +}
+View
+29  src/main/java/com/rokhmanov/strum/test/Test.java
+@@ -0,0 +1,29 @@
+ +package com.rokhmanov.strum.test;
+ +
+ +import java.util.UUID;
+ +import java.util.stream.Stream;
+ +
+ +import scala.concurrent.Future;
+ +import scala.concurrent.duration.Duration;
+ +import akka.actor.ActorRef;
+ +import akka.actor.ActorSystem;
+ +import akka.actor.Props;
+ +import akka.dispatch.OnSuccess;
+ +import akka.pattern.Patterns;
+ +import akka.util.Timeout;
+ +
+ +public class Test {
+ +
+ +	public static void main(String[] args) {
+ +		ActorSystem system = ActorSystem.create("test");
+ +		ActorRef testActor = system.actorOf(Props.create(TestActor.class)); 
+ +		Future<Object> future = Patterns.ask(testActor, "startsearch", new Timeout(Duration.create(30, "seconds")));
+ +		future.onSuccess(new OnSuccess<Object>(){
+ +			@Override
+ +			public void onSuccess(Object obj) {
+ +				((Stream<Tuple<UUID, String>>)obj).forEach(s -> System.out.println(s.x + "===>" + s.y)); 
+ +			}
+ +		}, system.dispatcher());
+ +	}
+ +
+ +}
+View
+40  src/main/java/com/rokhmanov/strum/test/TestActor.java
+@@ -0,0 +1,40 @@
+ +package com.rokhmanov.strum.test;
+ +
+ +import java.util.Date;
+ +import java.util.UUID;
+ +import java.util.concurrent.BlockingQueue;
+ +import java.util.concurrent.LinkedBlockingQueue;
+ +import java.util.stream.Stream;
+ +
+ +import scala.concurrent.ExecutionContext;
+ +import scala.concurrent.duration.Duration;
+ +import akka.actor.Scheduler;
+ +import akka.actor.UntypedActor;
+ +
+ +public class TestActor extends UntypedActor {
+ +	BlockingQueue<Tuple<UUID, String>> queue = new LinkedBlockingQueue<>();
+ +	private Scheduler scheduler = getContext().system().scheduler();
+ +	private ExecutionContext ec = getContext().system().dispatcher();
+ +
+ +	public void preStart(){
+ +		scheduler.schedule(Duration.create(1, "seconds"), Duration.create(1, "seconds"), getSelf(), "add", ec, getSelf());
+ +	}
+ +	
+ +	@Override
+ +	public void onReceive(Object message) throws Exception {
+ +		if (message.equals("startsearch")){
+ +			getSender().tell(Stream.generate(() -> produce()), getSelf());
+ +		} else if (message.equals("add")) {
+ +			queue.offer(new Tuple<UUID, String>(UUID.randomUUID(), new Date().toString()));
+ +		}
+ +	}
+ +
+ +	private Tuple<UUID, String> produce() {
+ +		try {
+ +			return queue.take();
+ +		} catch (InterruptedException e) {
+ +			e.printStackTrace();
+ +		}
+ +		return new Tuple<UUID, String>(null, "ERROR");
+ +	}
+ +}
+View
+11  src/main/java/com/rokhmanov/strum/test/Tuple.java
+@@ -0,0 +1,11 @@
+ +package com.rokhmanov.strum.test;
+ +
+ +public class Tuple<X, Y> {
+ +	public final X x;
+ +	public final Y y;
+ +
+ +	public Tuple(X x, Y y) {
+ +		this.x = x;
+ +		this.y = y;
+ +	}
+ +} 
+Vie
+Contact GitHub API 
