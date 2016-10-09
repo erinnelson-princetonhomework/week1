@@ -1,0 +1,266 @@
+Skip to content
+Este repository 
+Search
+Pull requests
+Issues
+Gist
+ @erinnelson-princetonhomework
+ Watch 2
+  Star 6
+  Fork 7 Revil/algs-percolation
+ Code  Issues 1  Pull requests 0  Projects 0  Wiki  Pulse  Graphs
+Browse files
+first commit
+Only Percolation.java completed, but there may be still some
+improvement.
+ master
+1 parent a04029b commit fc15a12b74b734b8a22624883202e09ef4ebef4d @Revil Revil committed on Aug 28, 2013
+Unified Split
+Showing  3 changed files  with 224 additions and 0 deletions.
+View
+3  .gitignore
+@@ -0,0 +1,3 @@
+ +*~
+ +*.class
+ +*.txt
+View
+141  Percolation.java
+@@ -0,0 +1,141 @@
+ +
+ +/**
+ + * Blocked sites are marked by -1, while open sites are non-negatives
+ + * numbers representing themselves or their root
+ + */
+ +
+ +enum SiteState { BLOCKED, OPEN }
+ +
+ +public class Percolation {
+ +    
+ +    private WeightedQuickUnionUF grid;
+ +    private Out     fileout;
+ +    private SiteState[] state;
+ +    private int     N;
+ +    private int     site_count;
+ +
+ +    // create N-by-N grid, with all sites blocked
+ +    public Percolation(int N) {
+ +
+ +        site_count = N * N;
+ +        this.N = N;
+ +
+ +        // index 0 and N^2+1 are reserved for virtual top and bottom sites
+ +        grid    = new WeightedQuickUnionUF(site_count + 2);
+ +        state   = new SiteState[site_count + 2];
+ +        fileout = new Out("test.txt");
+ +
+ +        // Initilize all sites to be blocked.
+ +        for (int i = 1; i <= site_count; i++)
+ +            state[i] = SiteState.BLOCKED;
+ +        // Initilize virtual top site and bottom site as open state
+ +        state[0] = SiteState.OPEN;
+ +        state[site_count+1] = SiteState.OPEN;
+ +        
+ +        fileout.println(this.N);
+ +        //checkGrid();
+ +    }
+ +
+ +    private void checkGrid() {
+ +        for (int i = 0; i < state.length; i++) {
+ +            System.out.printf("%.1s ", state[i].toString());
+ +            if (i % N == 0)
+ +                System.out.println();
+ +        }
+ +        System.out.println();
+ +    }
+ +
+ +    // return array index of given row i and column j
+ +    private int xyToIndex(int i, int j) {
+ +        // Attention: i and j are of range 1 ~ N, NOT 0 ~ N-1.
+ +        // Throw IndexOutOfBoundsException if i or j is not valid
+ +        if (i <= 0 || i > N) 
+ +            throw new IndexOutOfBoundsException("row " + i + " out of bound");
+ +        if (j <= 0 || j > N) 
+ +            throw new IndexOutOfBoundsException("column " + j + " out of bound");
+ +
+ +        return (i - 1) * N + j;
+ +    }
+ +
+ +    private boolean isTopSite(int index) {
+ +        return index <= N;
+ +    }
+ +
+ +    private boolean isBottomSite(int index) {
+ +        return index >= (N - 1) * N + 1;
+ +    }
+ +
+ +    // open site (row i, column j) if it is not already
+ +    public void open(int i, int j) {
+ +        // All input sites are blocked at first. Check the state of site before invoking
+ +        // this method.
+ +        // TODO: Position array index.
+ +        int idx, iaround;
+ +
+ +        idx = xyToIndex(i, j);
+ +        //System.out.printf("row %d and column %d create index %d\n", i, j, idx);
+ +        fileout.printf("%d %d\n", i, j);
+ +        // Mark the array content to be the array index.
+ +        state[idx] = SiteState.OPEN;
+ +        // Traverse surrounding sites, connect all open ones. Make sure we do not index sites out of bouns
+ +        if (i != 1) { 
+ +            iaround = xyToIndex(i - 1, j);
+ +            if (isOpen(i - 1, j)) grid.union(idx, iaround);
+ +        }
+ +        if (i != N) { 
+ +            iaround = xyToIndex(i + 1, j);
+ +            if (isOpen(i + 1, j)) grid.union(idx, iaround);
+ +        }
+ +        if (j != 1) { 
+ +            iaround = xyToIndex(i, j - 1);
+ +            if (isOpen(i, j - 1)) grid.union(idx, iaround);
+ +        }
+ +        if (j != N) { 
+ +            iaround = xyToIndex(i, j + 1);
+ +            if (isOpen(i, j + 1)) grid.union(idx, iaround);
+ +        }
+ +        // if site is on top or bottom, connect to corresponding virtual site.
+ +        if (isTopSite(idx))     grid.union(0, idx);
+ +        if (isBottomSite(idx))  grid.union(site_count+1, idx);
+ +    }
+ +
+ +    // is site (row i, column j) open?
+ +    public boolean isOpen(int i, int j) {
+ +        // Position array index
+ +        // Array content is non-negatives if site is open
+ +        int idx = xyToIndex(i, j);
+ +        return state[idx] == SiteState.OPEN;
+ +    }
+ +
+ +    // is site (row i, column j) full?
+ +    public boolean isFull(int i, int j) {
+ +        // Position array index
+ +        // Check if this site is open
+ +        // TODO: Check if the the site is connected to the virtual top site
+ +        int idx = xyToIndex(i, j);
+ +        return grid.connected(0, idx);
+ +    }
+ +
+ +    // does the system percolate?
+ +    public boolean percolates() {
+ +        // Check whether virtual top site and virtual bottom site are connected
+ +        return grid.connected(0, site_count+1);
+ +    }
+ +
+ +    public static void main(String[] args) {
+ +        // create a percolation object
+ +        Percolation pl = new Percolation(Integer.parseInt(args[0]));
+ +        int row, column;
+ +
+ +        do {
+ +            //  generate random row and column numbers between 1~N
+ +            row     = StdRandom.uniform(1, pl.N+1);
+ +            column  = StdRandom.uniform(1, pl.N+1);
+ +            if(pl.isOpen(row, column))
+ +                continue;
+ +            pl.open(row, column);
+ +            //pl.checkGrid();
+ +        } while (!pl.percolates());
+ +        pl.checkGrid();
+ +    }
+ +}
+View
+80  PercolationVisualizer.java
+@@ -0,0 +1,80 @@
+ +/****************************************************************************
+ + *  Compilation:  javac PercolationVisualizer.java
+ + *  Execution:    java PercolationVisualizer input.txt
+ + *  Dependencies: Percolation.java StdDraw.java In.java
+ + *
+ + *  This program takes the name of a file as a command-line argument.
+ + *  From that file, it
+ + *
+ + *    - Reads the grid size N of the percolation system.
+ + *    - Creates an N-by-N grid of sites (intially all blocked)
+ + *    - Reads in a sequence of sites (row i, column j) to open.
+ + *
+ + *  After each site is opened, it draws full sites in light blue,
+ + *  open sites (that aren't full) in white, and blocked sites in black,
+ + *  with with site (1, 1) in the upper left-hand corner.
+ + *
+ + ****************************************************************************/
+ +
+ +import java.awt.Font;
+ +
+ +public class PercolationVisualizer {
+ +
+ +    // delay in miliseconds (controls animation speed)
+ +    private static final int DELAY = 100;
+ +
+ +    // draw N-by-N percolation system
+ +    public static void draw(Percolation perc, int N) {
+ +        StdDraw.clear();
+ +        StdDraw.setPenColor(StdDraw.BLACK);
+ +        StdDraw.setXscale(0, N);
+ +        StdDraw.setYscale(0, N);
+ +        StdDraw.filledSquare(N/2.0, N/2.0, N/2.0);
+ +
+ +        // draw N-by-N grid
+ +        int opened = 0;
+ +        for (int row = 1; row <= N; row++) {
+ +            for (int col = 1; col <= N; col++) {
+ +                if (perc.isFull(row, col)) {
+ +                    StdDraw.setPenColor(StdDraw.BOOK_LIGHT_BLUE);
+ +                    opened++;
+ +                }
+ +                else if (perc.isOpen(row, col)) {
+ +                    StdDraw.setPenColor(StdDraw.WHITE);
+ +                    opened++;
+ +                }
+ +                else
+ +                    StdDraw.setPenColor(StdDraw.BLACK);
+ +                StdDraw.filledSquare(col - 0.5, N - row + 0.5, 0.45);
+ +            }
+ +        }
+ +
+ +        // write status text
+ +        StdDraw.setFont(new Font("SansSerif", Font.PLAIN, 12));
+ +        StdDraw.setPenColor(StdDraw.BLACK);
+ +        StdDraw.text(.25*N, -N*.025, opened + " open sites");
+ +        if (perc.percolates()) StdDraw.text(.75*N, -N*.025, "percolates");
+ +        else                   StdDraw.text(.75*N, -N*.025, "does not percolate");
+ +
+ +    }
+ +
+ +    public static void main(String[] args) {
+ +        In in = new In(args[0]);      // input file
+ +        int N = in.readInt();         // N-by-N percolation system
+ +
+ +        // turn on animation mode
+ +        StdDraw.show(0);
+ +
+ +        // repeatedly read in sites to open and draw resulting system
+ +        Percolation perc = new Percolation(N);
+ +        draw(perc, N);
+ +        StdDraw.show(DELAY);
+ +        while (!in.isEmpty()) {
+ +            int i = in.readInt();
+ +            int j = in.readInt();
+ +            perc.open(i, j);
+ +            draw(perc, N);
+ +            StdDraw.show(DELAY);
+ +        }
+ +    }
+ +} 
+0 comments on commit fc15a12
+@erinnelson-princetonhomework
+  
+            
+ 
+Write  Preview
+
+Leave a comment
+Attach files by dragging & dropping,  Choose Files selecting them, or pasting from the clipboard.
+ Styling with Markdown is supported
+Comment on this commit
+   Subscribe  You’re not receiving notifications from this thread.
+Contact GitHub API Training Shop Blog About
+© 2016 GitHub, Inc. Terms Privacy Security Status Help
